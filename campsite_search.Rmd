@@ -1,39 +1,47 @@
 ---
-title: "Untitled"
-output: html_document
+title: ""
+output: 
+  html_document:
+      css: tt_css.css
+runtime: shiny
 editor_options: 
   chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE)
 
 # https://github.com/juftin/camply
 
 library(reticulate)
 library(tidyverse)
-# use_python("/Users/brendangraham/Library/r-miniconda/envs/r-reticulate/bin/python3")
-# py_install("camply", python_version = 3, pip = TRUE)
-# py_install("pandas", python_version = 3, pip = TRUE)
-# py_install("NumPy", python_version = 3, pip = TRUE)
-# py_install("python-dotenv", python_version = 3, pip = TRUE)
-# py_install("tenacity", python_version = 3, pip = TRUE)
-# py_install("PyYAML", python_version = 3, pip = TRUE)
-
-# virtualenv_create(envname = "r-reticulate",
-#                   python = "/Users/brendangraham/Library/r-miniconda/envs/r-reticulate/bin/python3",
-#                   packages = FALSE
-#                   )
+library(reactable)
+library(DT)
+library(shiny)
+library(emo)
 
 use_virtualenv("r-reticulate")
-# conda_install("r-reticulate", "camply")
-# conda_install("r-reticulate", "pandas = 1.3.0")
-
-
 
 ```
 
-```{python}
+
+<head>
+<link href="https://fonts.googleapis.com/css2?family=Roboto&display=swap" rel="stylesheet"> 
+</head>
+
+<style type="text/css">
+.main-container {
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+# `r paste("Raystown Lake Campsite Availability", emo::ji("camping"))`
+
+#### Searching all loops at Raystown between April - Sept 2022:
+
+```{python eval = T}
 
 import datetime
 import logging
@@ -43,47 +51,57 @@ import pandas as pd
 from camply.containers import AvailableCampsite, SearchWindow
 from camply.search import SearchRecreationDotGov
 
-logging.basicConfig(format="%(asctime)s [%(levelname)8s]: %(message)s",
-                    level=logging.INFO)
+# logging.basicConfig(format="%(asctime)s [%(levelname)8s]: %(message)s",
+#                     level=logging.INFO)
 
-month_of_june = SearchWindow(start_date=datetime(year = 2022, month = 6, day = 1),
-                             end_date=datetime(year = 2022, month = 6, day = 30))
+search_range = SearchWindow(start_date=datetime.datetime(year = 2022, month = 4, day = 1),
+                             end_date=datetime.datetime(year = 2022, month = 9, day = 30))
                              
-camping_finder = SearchRecreationDotGov(search_window = month_of_june,
+camping_finder = SearchRecreationDotGov(search_window = search_range,
                                         recreation_area = 187,  # raystown lake
                                         campgrounds = 233626, # seven points
                                         weekends_only = False,
                                         nights = 5)
                                         
-match: List[AvailableCampsite] = camping_finder.get_matching_campsites(log=False, verbose=True, continuous=False)
+# match: List[AvailableCampsite] = camping_finder.get_matching_campsites(log=False, verbose=True, continuous=False)
 
-match: List[results]
+results = camping_finder.get_matching_campsites(log = True, verbose = True, continuous = False)
 
 results_df = pd.DataFrame(results)
 
+```
 
-AvailableCampsite(campsite_id="5391",
-                  booking_date=datetime.datetime(2022, 6, 13, 0, 0),
-                  booking_nights = 4,
-                  booking_end_date = datetime.datetime(2022, 6, 17, 0, 0),
-                  campsite_site_name="B37",
-                  campsite_loop_name="Loop B",
-                  campsite_type="STANDARD NONELECTRIC",
-                  campsite_occupancy=(0, 8),
-                  campsite_use_type="Overnight",
-                  availability_status="Available",
-                  recreation_area="Glacier National Park, MT",
-                  recreation_area_id="2725",
-                  facility_name="Fish Creek Campground",
-                  facility_id="232493",
-                  booking_url="https://www.recreation.gov/camping/campsites/5391"
-                  )
-                      
+`r shiny::hr()` 
+
+## Filterable Results
+
+```{r inputs}
+campsites <- 
+  c("SENO", "PCAM", "RCAM", "MCAM", "VCAM", "BCAM")
+
+# months  <-
+#   tibble(
+#     date = seq(Sys.Date(), Sys.Date() + 400, "1 month")) %>%
+#   mutate(month = month(date, abbr = T, label = T)) %>%
+#   distinct(month) %>%
+#   pull(month) 
+
+shiny::selectInput(inputId = "campsite_select", choices = sort(campsites), label = "Loop", multiple = T, selected = "SENO")
+# shiny::numericInput(inputId = "night_select", label = "Nights", value = 4, min = 1, step = 1)
+# shiny::selectInput(inputId = "month_select", label = "Month", choices = months, selected = month(Sys.Date(), label = T, abbr = T), multiple = T)
 
 ```
 
-```{r}
-py$results_df %>%
-  filter(campsite_loop_name == "SENO") %>% View
-
+```{r eval = T}
+DT::renderDataTable(
+  py$results_df %>% 
+    select(-campsite_occupancy) %>% 
+    filter(campsite_loop_name == input$campsite_select) %>%
+  mutate(booking_date = as.Date(booking_date),
+         booking_end_date = as.Date(booking_end_date)) %>%
+    select(booking_date, booking_end_date, campsite_loop_name, campsite_site_name, booking_url) %>%
+    mutate(booking_url = paste0("<a href='", booking_url, " 'target='_blank'> Book Site </a>")) %>%
+    datatable(., escape = F, rownames = F) 
+)
 ```
+
