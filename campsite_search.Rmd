@@ -19,6 +19,7 @@ library(reactable)
 library(DT)
 library(shiny)
 library(emo)
+library(lubridate)
 
 use_virtualenv("r-reticulate")
 
@@ -41,7 +42,45 @@ use_virtualenv("r-reticulate")
 
 #### Searching all loops at Raystown between April - Sept 2022:
 
-```{python eval = T}
+```{r}
+month_lookup <-
+  tibble(
+    date = seq(Sys.Date(), Sys.Date() + 400, "1 month")) %>%
+  mutate(month_name = month(date, abbr = T, label = T),
+         month_number = month(date),
+         month_days = days_in_month(date)) 
+
+shiny::numericInput(inputId = "night_select", label = "Nights", value = 4, min = 1, step = 1)
+shiny::selectInput(inputId = "month_select", label = "Month", choices = unique(month_lookup$month_name), selected = month(Sys.Date(), label = T, abbr = T), multiple = F)
+shiny::selectInput(inputId = "month_end_select", label = "Month", choices = unique(month_lookup$month_name), selected = month(Sys.Date(), label = T, abbr = T), multiple = F)
+
+day_end <-
+  reactive(
+    month_lookup %>%
+      filter(month == input$month_select) %>%
+      pull(month_days)
+  )
+
+month_start <-
+  reactive(
+    month_lookup %>%
+      filter(month == input$month_select) %>%
+      pull(month_number)
+  )
+
+month_end <-
+  reactive(
+    month_lookup %>%
+      filter(month == input$month_end_select) %>%
+      pull(month_number)
+  )
+
+nights <- 5
+  # reactive(input$night_select)
+
+```
+
+```{python}
 
 import datetime
 import logging
@@ -51,22 +90,23 @@ import pandas as pd
 from camply.containers import AvailableCampsite, SearchWindow
 from camply.search import SearchRecreationDotGov
 
-# logging.basicConfig(format="%(asctime)s [%(levelname)8s]: %(message)s",
-#                     level=logging.INFO)
+logging.basicConfig(format="%(asctime)s [%(levelname)8s]: %(message)s",
+                    level=logging.INFO)
 
-search_range = SearchWindow(start_date=datetime.datetime(year = 2022, month = 4, day = 1),
-                             end_date=datetime.datetime(year = 2022, month = 9, day = 30))
+search_range = SearchWindow(start_date=datetime.datetime(year = 2022, month = 6, day = 1),
+                             end_date=datetime.datetime(year = 2022, month = 6, day = 30))
                              
 camping_finder = SearchRecreationDotGov(search_window = search_range,
                                         recreation_area = 187,  # raystown lake
                                         campgrounds = 233626, # seven points
                                         weekends_only = False,
-                                        nights = 5)
+                                        nights = int(r.nights))
                                         
 # match: List[AvailableCampsite] = camping_finder.get_matching_campsites(log=False, verbose=True, continuous=False)
 
-results = camping_finder.get_matching_campsites(log = True, verbose = True, continuous = False)
+results = camping_finder.get_matching_campsites(log = False, verbose = False, continuous = False)
 
+# convert named tuple results to dataframe
 results_df = pd.DataFrame(results)
 
 ```
@@ -75,9 +115,26 @@ results_df = pd.DataFrame(results)
 
 ## Filterable Results
 
+```{r}
+
+results <-
+  py$results_df %>% 
+  select(-campsite_occupancy) %>% 
+  mutate(booking_date = as.Date(booking_date),
+         booking_end_date = as.Date(booking_end_date),
+         campsite = paste(campsite_loop_name, campsite_site_name))
+
+```
+
 ```{r inputs}
-campsites <- 
+loops <- 
   c("SENO", "PCAM", "RCAM", "MCAM", "VCAM", "BCAM")
+
+best_spots  <- 
+  c("SENO 182")
+
+campsites <- 
+  sort(unique(results$campsite_site_name))
 
 # months  <-
 #   tibble(
@@ -86,22 +143,62 @@ campsites <-
 #   distinct(month) %>%
 #   pull(month) 
 
-shiny::selectInput(inputId = "campsite_select", choices = sort(campsites), label = "Loop", multiple = T, selected = "SENO")
+shiny::selectInput(inputId = "loop_select", choices = sort(loops), label = "Loop", multiple = T, selected = "SENO")
+# shiny::selectInput(inputId = "campsite_select", choices = campsites, label = "Campsite", multiple = T, selected = min(campsites))
 # shiny::numericInput(inputId = "night_select", label = "Nights", value = 4, min = 1, step = 1)
 # shiny::selectInput(inputId = "month_select", label = "Month", choices = months, selected = month(Sys.Date(), label = T, abbr = T), multiple = T)
 
 ```
 
 ```{r eval = T}
-DT::renderDataTable(
-  py$results_df %>% 
-    select(-campsite_occupancy) %>% 
-    filter(campsite_loop_name == input$campsite_select) %>%
-  mutate(booking_date = as.Date(booking_date),
-         booking_end_date = as.Date(booking_end_date)) %>%
+# DT::renderDataTable(
+#   results %>%
+#     filter(campsite_loop_name %in% input$loop_select,
+#            campsite_site_name %in% input$campsite_select) %>%
+#     # filter() %>%
+#     select(booking_date, booking_end_date, campsite_loop_name, campsite_site_name, booking_url) %>%
+#     mutate(booking_url = paste0("<a href='", booking_url, " 'target='_blank'> Book Site </a>")) %>%
+#     datatable(., escape = F, rownames = F, filter = 'top',
+#               extensions = c('Responsive',
+#                              'Scroller'),
+#               style = 'bootstrap',
+#               options = list(
+#                 pageLength = 25,
+#                 columnDefs = list(list(className = 'dt-left', targets = '_all')
+#                 )
+#               )) 
+# )
+
+
+renderReactable({
+  
+  table_data <- 
+    results %>%
+    filter(campsite_loop_name %in% input$loop_select
+           # campsite_site_name %in% input$campsite_select
+    ) %>%
+    filter() %>%
     select(booking_date, booking_end_date, campsite_loop_name, campsite_site_name, booking_url) %>%
-    mutate(booking_url = paste0("<a href='", booking_url, " 'target='_blank'> Book Site </a>")) %>%
-    datatable(., escape = F, rownames = F) 
-)
+    mutate(booking_range = paste(format(booking_date, "%b %d"), format(booking_end_date, "%b %d"), sep = "-")) %>%
+    arrange(campsite_site_name, booking_date) %>%
+    select(-c(booking_date, booking_end_date)) %>%
+    select(campsite_loop_name, campsite_site_name, booking_range, booking_url)
+  
+  reactable(
+    table_data, searchable = TRUE, sortable = TRUE, filterable = TRUE, wrap = FALSE, resizable = TRUE, fullWidth = FALSE,
+    groupBy = c("campsite_loop_name", "campsite_site_name"),
+    columns = list(
+      campsite_loop_name = colDef(name = "Loop", minWidth = 145),
+      campsite_site_name = colDef(name = "Site", minWidth = 145),
+      booking_range = colDef(name = "Available Dates", minWidth = 165),
+      booking_url = colDef(name = "URL",
+                           minWidth = 125,
+                           cell = function(value) {
+                             htmltools::tags$a(href = value, target = "_blank", "Book Site")
+                           })
+    )
+  )
+})
+
 ```
 

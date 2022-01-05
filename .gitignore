@@ -2,3 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
+reprex_example.html
+reprex_example.Rmd
+test.py
